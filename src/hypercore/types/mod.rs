@@ -1712,7 +1712,7 @@ pub struct Liquidation {
 /// Order type.
 ///
 /// Determines the behaviour of the order (limit, market, or trigger).
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum OrderType {
     Limit,
@@ -1726,6 +1726,12 @@ pub enum OrderType {
     TakeProfitMarket,
     #[serde(rename = "Take Profit Limit")]
     TakeProfitLimit,
+    #[serde(rename = "Take Profit")]
+    TakeProfit,
+    #[serde(rename = "Stop Loss")]
+    StopLoss,
+    #[serde(untagged)]
+    Unknown(String),
 }
 
 /// Time‑in‑force.
@@ -5659,5 +5665,23 @@ mod tests {
                 serde_json::json!({"type": "openOrders", "user": "0x0000000000000000000000000000000000001234"}),
             );
         }
+    }
+
+    #[test]
+    fn test_order_type_deserialization() {
+        use crate::hypercore::types::OrderType;
+
+        let json = r#"["Take Profit", "Stop Loss", "Take Profit Market", "Some Weird Type"]"#;
+        let types: Vec<OrderType> = serde_json::from_str(json).unwrap();
+        
+        assert_eq!(
+            types,
+            vec![
+                OrderType::TakeProfit,
+                OrderType::StopLoss,
+                OrderType::TakeProfitMarket,
+                OrderType::Unknown("Some Weird Type".to_string())
+            ]
+        );
     }
 }
