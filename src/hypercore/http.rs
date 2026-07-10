@@ -128,6 +128,7 @@ impl Client {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .tcp_nodelay(true)
+            .http3_prior_knowledge() // Force HTTP/3 (QUIC) connections for Cloudflare
             .build()
             .unwrap();
 
@@ -3171,5 +3172,18 @@ where
             .await?;
 
         resp.into_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_initialization() {
+        // Ensure that the client can be initialized without panicking,
+        // which verifies that HTTP/3 and rustls features are available and the builder succeeds.
+        let _mainnet_client = Client::new(Chain::Mainnet);
+        let _testnet_client = Client::new(Chain::Testnet);
     }
 }
