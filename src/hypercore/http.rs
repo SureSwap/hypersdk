@@ -2444,7 +2444,7 @@ impl Client {
         let action = Action::UsdClassTransfer(UsdClassTransferAction {
             signature_chain_id: self.chain.arbitrum_id().to_string(),
             hyperliquid_chain: self.chain,
-            amount: amount.to_string(),
+            amount: amount.normalize().to_string(),
             to_perp,
             nonce,
         });
