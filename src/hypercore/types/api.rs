@@ -699,7 +699,7 @@ pub struct UsdSendAction {
     )]
     pub destination: Address,
     /// The amount.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     /// Current time, should match the nonce
     pub time: u64,
@@ -754,7 +754,7 @@ pub struct SpotSendAction {
     /// Token
     pub token: String,
     /// The amount.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     /// Current time, should match the nonce
     pub time: u64,
@@ -785,7 +785,7 @@ pub struct SendAssetAction {
     /// Token
     pub token: String,
     /// The amount.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     /// From subaccount, can be empty
     pub from_sub_account: String,
@@ -817,7 +817,7 @@ pub struct AgentSendAssetAction {
     /// Token, e.g. `"PURR:0xc4bf3f870c0e9465323c0b6ed28096c2"`.
     pub token: String,
     /// Amount to send.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     /// Source subaccount address, or empty string if sending from the main account.
     pub from_sub_account: String,
@@ -1300,7 +1300,7 @@ pub struct TwapOrderParams {
     /// `true` for buy, `false` for sell.
     pub b: bool,
     /// Size.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub s: Decimal,
     /// Reduce only.
     pub r: bool,
@@ -1323,7 +1323,7 @@ pub struct Withdraw3Action {
         deserialize_with = "crate::hypercore::utils::deserialize_address_from_hex"
     )]
     pub destination: Address,
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     pub time: u64,
 }
@@ -1462,7 +1462,7 @@ pub struct SplitOutcome {
     /// Outcome ID from `outcomeMeta`.
     pub outcome: u32,
     /// Amount of the quote token to split.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
 }
 
@@ -1497,7 +1497,7 @@ pub struct NegateOutcome {
     /// Outcome ID to negate from `outcomeMeta`.
     pub outcome: u32,
     /// Amount to negate.
-    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
 }
 
