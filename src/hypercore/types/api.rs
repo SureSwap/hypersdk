@@ -1341,20 +1341,27 @@ pub struct UsdClassTransferAction {
     pub nonce: u64,
 }
 
-/// Delegate or undelegate staked tokens to a validator.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenDelegateAction {
+    /// Signature chain ID.
+    ///
+    /// For arbitrum use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`].
+    pub signature_chain_id: String,
+    /// The chain this action is being executed on.
+    pub hyperliquid_chain: Chain,
     /// Validator address.
     #[serde(
         serialize_with = "crate::hypercore::utils::serialize_address_as_hex",
         deserialize_with = "crate::hypercore::utils::deserialize_address_from_hex"
     )]
     pub validator: Address,
-    /// `true` to undelegate, `false` to delegate.
-    pub is_undelegate: bool,
     /// Amount in wei of native token.
     pub wei: u64,
+    /// `true` to undelegate, `false` to delegate.
+    pub is_undelegate: bool,
+    /// Request nonce (timestamp in ms); must match the outer nonce.
+    pub nonce: u64,
 }
 
 /// HIP-3 backstop liquidator transfer.

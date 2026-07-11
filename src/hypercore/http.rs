@@ -2492,9 +2492,12 @@ impl Client {
         expires_after: Option<DateTime<Utc>>,
     ) -> Result<()> {
         let action = Action::TokenDelegate(TokenDelegateAction {
+            signature_chain_id: self.chain.arbitrum_id().to_string(),
+            hyperliquid_chain: self.chain,
             validator,
-            is_undelegate,
             wei,
+            is_undelegate,
+            nonce,
         });
         let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
         self.send(req).await?.into_default()
