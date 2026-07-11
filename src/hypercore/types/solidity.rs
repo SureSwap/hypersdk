@@ -85,7 +85,7 @@ sol! {
         uint64 nonce;
     }
 
-    struct Withdraw3 {
+    struct Withdraw {
         string hyperliquidChain;
         string destination;
         string amount;

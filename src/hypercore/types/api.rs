@@ -339,7 +339,7 @@ impl Action {
                 signer.sign_dynamic_typed_data_sync(&typed_data)?
             }
             Action::Withdraw3(inner) => {
-                let typed_data = get_typed_data::<solidity::Withdraw3>(&inner, chain, None);
+                let typed_data = get_typed_data::<solidity::Withdraw>(&inner, chain, None);
                 signer.sign_dynamic_typed_data_sync(&typed_data)?
             }
             Action::UsdClassTransfer(inner) => {
@@ -470,7 +470,7 @@ impl Action {
                 signer.sign_dynamic_typed_data(&typed_data).await?
             }
             Action::Withdraw3(inner) => {
-                let typed_data = get_typed_data::<solidity::Withdraw3>(&inner, chain, None);
+                let typed_data = get_typed_data::<solidity::Withdraw>(&inner, chain, None);
                 signer.sign_dynamic_typed_data(&typed_data).await?
             }
             Action::UsdClassTransfer(inner) => {
@@ -597,7 +597,7 @@ impl Action {
                 Ok(typed_data.eip712_signing_hash()?)
             }
             Action::Withdraw3(inner) => {
-                let typed_data = get_typed_data::<solidity::Withdraw3>(&inner, chain, None);
+                let typed_data = get_typed_data::<solidity::Withdraw>(&inner, chain, None);
                 Ok(typed_data.eip712_signing_hash()?)
             }
             Action::UsdClassTransfer(inner) => {
