@@ -2560,11 +2560,18 @@ pub enum TpSl {
 /// Batch modify request.
 ///
 /// Contains a list of order modifications to be applied atomically.
+///
+/// The `always_place` field (`"a"` on the wire) **must be omitted** when `false`.
+/// Setting it to `Some(true)` causes the new order to be placed even if the cancel fails.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchModify {
     /// The modifications to apply.
     pub modifies: Vec<Modify>,
+    /// When `Some(true)`, place the new order even if the cancel fails.
+    /// MUST be omitted (not `false`) when not set — the API rejects `false`.
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+    pub always_place: Option<bool>,
 }
 
 /// Modification of an existing order.
@@ -2584,19 +2591,31 @@ pub struct Modify {
 /// Batch cancel request.
 ///
 /// Contains a list of order IDs to cancel.
+///
+/// The `fast` field (`"f"` on the wire) **must be omitted** when `false`.
+/// `Some(true)` rejects trigger orders and will (in a future upgrade) be
+/// prioritised in the mempool.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchCancel {
     pub cancels: Vec<Cancel>,
+    /// Fast cancel flag. MUST be omitted (not `false`) when not set.
+    #[serde(rename = "f", skip_serializing_if = "Option::is_none")]
+    pub fast: Option<bool>,
 }
 
 /// Batch cancel by cloid request.
 ///
 /// Contains a list of cloid values to cancel.
+///
+/// Same fast-flag semantics as [`BatchCancel`].
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchCancelCloid {
     pub cancels: Vec<CancelByCloid>,
+    /// Fast cancel flag. MUST be omitted (not `false`) when not set.
+    #[serde(rename = "f", skip_serializing_if = "Option::is_none")]
+    pub fast: Option<bool>,
 }
 
 /// Cancel request for a single order.
@@ -3212,6 +3231,101 @@ pub struct DelegatorSummary {
     pub undelegated: Decimal,
     pub total_pending_withdrawal: Decimal,
     pub n_pending_withdrawals: u64,
+}
+
+/// A single entry from a user's staking delegation history.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatorHistoryEntry {
+    pub time: u64,
+    pub hash: String,
+    pub delta: DelegatorDelta,
+}
+
+/// The delta component of a [`DelegatorHistoryEntry`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatorDelta {
+    pub delegate: DelegateDelta,
+}
+
+/// Delegate or undelegate event inside a [`DelegatorDelta`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegateDelta {
+    pub validator: Address,
+    pub amount: Decimal,
+    pub is_undelegate: bool,
+}
+
+/// A staking reward entry returned by `delegatorRewards`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatorReward {
+    pub time: u64,
+    /// One of `"delegation"` or `"commission"`.
+    pub source: String,
+    pub total_amount: Decimal,
+}
+
+/// Reserve state for a single token in the borrow/lend protocol.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BorrowLendReserveState {
+    pub borrow_yearly_rate: Decimal,
+    pub supply_yearly_rate: Decimal,
+    pub balance: Decimal,
+    pub utilization: Decimal,
+    pub oracle_px: Decimal,
+    pub ltv: Decimal,
+    pub total_supplied: Decimal,
+    pub total_borrowed: Decimal,
+}
+
+/// Fully resolved state of a settled outcome market.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettledOutcome {
+    pub spec: OutcomeSpec,
+    pub settle_fraction: Decimal,
+    pub details: String,
+}
+
+/// Specification for a prediction-market outcome.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeSpec {
+    pub outcome: u64,
+    pub name: String,
+    pub description: String,
+    pub side_specs: Vec<OutcomeSideSpec>,
+    pub quote_token: Option<String>,
+}
+
+/// A single side (Yes/No) of an [`OutcomeSpec`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct OutcomeSideSpec {
+    pub name: String,
+}
+
+/// AQAv2 role for governance authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AqaV2Role {
+    Technical,
+    Treasury,
+}
+
+/// Adjust isolated margin by targeting a specific leverage level.
+///
+/// Unlike [`UpdateIsolatedMargin`] which takes a USDC delta, this action computes
+/// the required margin change to hit exactly the given leverage ratio.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopUpIsolatedOnlyMargin {
+    /// Asset index.
+    pub asset: u32,
+    /// Target leverage as a string (e.g. `"10.0"`).
+    pub leverage: String,
 }
 
 /// Perp deploy auction status.
@@ -3946,6 +4060,10 @@ pub(super) enum InfoRequest {
     GossipPriorityAuctionStatus,
     /// Query account abstraction mode for a user.
     UserAbstraction {
+        user: Address,
+    },
+    /// Query a user's HIP-3 DEX abstraction enabled state (deprecated: prefer `UserAbstraction`).
+    UserDexAbstraction {
         user: Address,
     },
     /// Check builder fee approval for a user.

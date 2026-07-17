@@ -67,14 +67,15 @@ use crate::hypercore::{
     },
     mainnet_url, testnet_url,
     types::{
-        AbstractionMode, ActiveAssetData, AgentSendAsset, BasicOrder, BatchCancel,
-        BatchCancelCloid, BatchModify, BatchOrder, ClearinghouseState, Delegation,
-        DelegatorSummary, DeployAuctionStatus, Fill, FundingRate, InfoRequest, L2Book,
-        OrderGrouping, OrderRequest, OrderResponseStatus, OrderTypePlacement, OrderUpdate,
-        PerpDexLimits, PerpDexStatus, PredictedFundingVenue, ScheduleCancel, SendAsset, SendToken,
-        SpotSend, SubAccount, TimeInForce, TokenDetails, TwapSliceFill, UsdSend, UserBalance,
-        UserFees, UserFundingEntry, UserRateLimit, UserRole, UserSetAbstractionAction,
-        UserVaultEquity, VaultDetails,
+        AbstractionMode, ActiveAssetData, AgentSendAsset, AqaV2Role, BasicOrder, BatchCancel,
+        BatchCancelCloid, BatchModify, BatchOrder, BorrowLendReserveState, ClearinghouseState,
+        Delegation, DelegatorHistoryEntry, DelegatorReward, DelegatorSummary, DeployAuctionStatus,
+        Fill, FundingRate, InfoRequest, L2Book, OrderGrouping, OrderRequest, OrderResponseStatus,
+        OrderTypePlacement, OrderUpdate, PerpDexLimits, PerpDexStatus, PredictedFundingVenue,
+        ScheduleCancel, SendAsset, SendToken, SettledOutcome, SpotSend, SubAccount, TimeInForce,
+        TokenDetails, TopUpIsolatedOnlyMargin, TwapSliceFill, UsdSend, UserBalance, UserFees,
+        UserFundingEntry, UserRateLimit, UserRole, UserSetAbstractionAction, UserVaultEquity,
+        VaultDetails,
     },
 };
 
@@ -2277,7 +2278,7 @@ impl Client {
     }
 
     /// Returns settled outcome market result.
-    pub async fn settled_outcome(&self, outcome: u64) -> Result<serde_json::Value> {
+    pub async fn settled_outcome(&self, outcome: u64) -> Result<SettledOutcome> {
         let req = InfoRequest::SettledOutcome { outcome };
         self.send_info_request("settled_outcome", &req).await
     }
@@ -2313,13 +2314,13 @@ impl Client {
     }
 
     /// Returns delegation history for a user.
-    pub async fn delegator_history(&self, user: Address) -> Result<Vec<serde_json::Value>> {
+    pub async fn delegator_history(&self, user: Address) -> Result<Vec<DelegatorHistoryEntry>> {
         let req = InfoRequest::DelegatorHistory { user };
         self.send_info_request("delegator_history", &req).await
     }
 
     /// Returns delegation rewards for a user.
-    pub async fn delegator_rewards(&self, user: Address) -> Result<Vec<serde_json::Value>> {
+    pub async fn delegator_rewards(&self, user: Address) -> Result<Vec<DelegatorReward>> {
         let req = InfoRequest::DelegatorRewards { user };
         self.send_info_request("delegator_rewards", &req).await
     }
@@ -2331,7 +2332,7 @@ impl Client {
     }
 
     /// Returns borrow/lend reserve state for a specific token.
-    pub async fn borrow_lend_reserve_state(&self, token: u32) -> Result<serde_json::Value> {
+    pub async fn borrow_lend_reserve_state(&self, token: u32) -> Result<BorrowLendReserveState> {
         let req = InfoRequest::BorrowLendReserveState { token };
         self.send_info_request("borrow_lend_reserve_state", &req)
             .await
@@ -2378,7 +2379,81 @@ impl Client {
         self.send_info_request("simple_open_orders", &req).await
     }
 
+    /// Query a user's HIP-3 DEX abstraction enabled state.
+    ///
+    /// **Deprecated** by the API in favour of [`Client::user_abstraction`], which returns a
+    /// richer abstraction mode string. Use this only for compatibility with older integrations.
+    pub async fn user_dex_abstraction(&self, user: Address) -> Result<bool> {
+        let req = InfoRequest::UserDexAbstraction { user };
+        self.send_info_request("user_dex_abstraction", &req).await
+    }
+
     // --- Exchange actions (Phase 2) ---
+
+    /// Claim accumulated staking and referral rewards.
+    ///
+    /// Withdraws any unclaimed rewards into the user's perpetuals balance.
+    pub async fn claim_rewards<S: SignerSync>(
+        &self,
+        signer: &S,
+        nonce: u64,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<Response> {
+        let action = Action::ClaimRewards;
+        let req = action.sign_sync(signer, nonce, None, expires_after, self.chain)?;
+        self.send(req).await
+    }
+
+    /// Adjust isolated margin to hit a target leverage level.
+    ///
+    /// Unlike [`Client::update_isolated_margin`] which takes a raw USDC delta, this action
+    /// instructs the exchange to compute the exact margin adjustment required to reach
+    /// the specified leverage ratio.
+    pub async fn top_up_isolated_margin<S: SignerSync>(
+        &self,
+        signer: &S,
+        asset: u32,
+        leverage: String,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<Response> {
+        let action = Action::TopUpIsolatedOnlyMargin(TopUpIsolatedOnlyMargin { asset, leverage });
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await
+    }
+
+    /// Validator vote on the risk-free rate for an aligned quote asset.
+    ///
+    /// Only valid for validator-operated accounts. The rate is expressed as a decimal
+    /// percent string, e.g. `"0.04"` for 4%.
+    pub async fn validator_l1_stream<S: SignerSync>(
+        &self,
+        signer: &S,
+        risk_free_rate: String,
+        nonce: u64,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<Response> {
+        let action = Action::ValidatorL1Stream { risk_free_rate };
+        let req = action.sign_sync(signer, nonce, None, expires_after, self.chain)?;
+        self.send(req).await
+    }
+
+    /// Authorize an AQAv2 role (technical or treasury) for a token.
+    ///
+    /// Grants the specified role to the signing address for the given token index.
+    pub async fn authorize_aqav2_role<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        role: AqaV2Role,
+        nonce: u64,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<Response> {
+        let action = Action::AuthorizeAqav2Role { token, role };
+        let req = action.sign_sync(signer, nonce, None, expires_after, self.chain)?;
+        self.send(req).await
+    }
 
     /// Place a TWAP order.
     pub async fn twap_order<S: SignerSync>(
@@ -2952,7 +3027,7 @@ impl Client {
     ///
     /// Alias for [`delegator_rewards`](Self::delegator_rewards), using the Python SDK naming.
     /// Each entry contains a timestamp, source, and total reward amount.
-    pub async fn user_staking_rewards(&self, user: Address) -> Result<Vec<serde_json::Value>> {
+    pub async fn user_staking_rewards(&self, user: Address) -> Result<Vec<DelegatorReward>> {
         self.delegator_rewards(user).await
     }
 }

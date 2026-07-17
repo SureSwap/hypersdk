@@ -18,8 +18,9 @@ use super::solidity;
 use crate::hypercore::{
     ApiError, Chain,
     types::{
-        BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, CORE_MAINNET_EIP712_DOMAIN,
-        OrderResponseStatus, ScheduleCancel, Signature,
+        AqaV2Role, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder,
+        CORE_MAINNET_EIP712_DOMAIN, OrderResponseStatus, ScheduleCancel, Signature,
+        TopUpIsolatedOnlyMargin,
     },
     utils::{self, get_typed_data},
 };
@@ -182,6 +183,27 @@ pub enum Action {
     /// Wire format: `{"type": "perpDeploy", "<subVariant>": {...}}`
     #[from(skip)]
     PerpDeploy(PerpDeployAction),
+    /// Claim accumulated staking and referral rewards.
+    #[from(skip)]
+    ClaimRewards,
+    /// Adjust isolated margin to hit a target leverage level (alternative to [`UpdateIsolatedMargin`]).
+    #[from(skip)]
+    TopUpIsolatedOnlyMargin(TopUpIsolatedOnlyMargin),
+    /// Validator vote on the risk-free rate for an aligned quote asset.
+    #[from(skip)]
+    ValidatorL1Stream {
+        /// Risk-free rate as a percent string, e.g. `"0.04"` for 4%.
+        #[serde(rename = "riskFreeRate")]
+        risk_free_rate: String,
+    },
+    /// Authorize an AQAv2 role (technical or treasury) for a token.
+    #[from(skip)]
+    AuthorizeAqav2Role {
+        /// Token index (e.g. `0` for USDC).
+        token: u32,
+        /// The role to authorize.
+        role: AqaV2Role,
+    },
 }
 
 impl Action {
@@ -306,7 +328,11 @@ impl Action {
             | Action::Hip3LiquidatorTransfer(_)
             | Action::UserOutcome(_)
             | Action::SpotDeploy(_)
-            | Action::PerpDeploy(_) => {
+            | Action::PerpDeploy(_)
+            | Action::ClaimRewards
+            | Action::TopUpIsolatedOnlyMargin(_)
+            | Action::ValidatorL1Stream { .. }
+            | Action::AuthorizeAqav2Role { .. } => {
                 let connection_id = self.hash(nonce, maybe_vault_address, expires_after)?;
                 let agent = solidity::Agent {
                     source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -437,7 +463,11 @@ impl Action {
             | Action::Hip3LiquidatorTransfer(_)
             | Action::UserOutcome(_)
             | Action::SpotDeploy(_)
-            | Action::PerpDeploy(_) => {
+            | Action::PerpDeploy(_)
+            | Action::ClaimRewards
+            | Action::TopUpIsolatedOnlyMargin(_)
+            | Action::ValidatorL1Stream { .. }
+            | Action::AuthorizeAqav2Role { .. } => {
                 let connection_id = self.hash(nonce, maybe_vault_address, expires_after)?;
                 let agent = solidity::Agent {
                     source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -565,7 +595,11 @@ impl Action {
             | Action::Hip3LiquidatorTransfer(_)
             | Action::UserOutcome(_)
             | Action::SpotDeploy(_)
-            | Action::PerpDeploy(_) => {
+            | Action::PerpDeploy(_)
+            | Action::ClaimRewards
+            | Action::TopUpIsolatedOnlyMargin(_)
+            | Action::ValidatorL1Stream { .. }
+            | Action::AuthorizeAqav2Role { .. } => {
                 let expires_after =
                     maybe_expires_after.map(|after| after.timestamp_millis() as u64);
                 let connection_id = self
