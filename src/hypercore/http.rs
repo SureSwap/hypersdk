@@ -60,7 +60,8 @@ use crate::hypercore::{
     Market, MultiSigConfig, OidOrCloid, OutcomeMeta, PerpMarket, Signature, SpotMarket, SpotToken,
     api::{
         Action, ActionRequest, ApproveAgent, ApproveBuilderFee, ConvertToMultiSigUser,
-        GossipPriorityBid, Hip3LiquidatorTransferAction, OkResponse, Response, SignersConfig,
+        GossipPriorityBid, Hip3LiquidatorTransferAction, OkResponse, PerpAssetRequest,
+        PerpDeployAction, PerpDexSchema, Response, SignersConfig, SpotDeployAction, SpotTokenSpec,
         TokenDelegateAction, TwapOrderParams, UpdateIsolatedMargin, UpdateLeverage,
         UsdClassTransferAction, UserOutcomeAction, VaultTransfer, Withdraw3Action,
     },
@@ -76,6 +77,7 @@ use crate::hypercore::{
         UserVaultEquity, VaultDetails,
     },
 };
+
 
 /// HTTP client for HyperCore API.
 ///
@@ -2641,7 +2643,320 @@ impl Client {
             expires_after,
         )
     }
+
+    // --- Spot deploy ---
+
+    /// Register a new spot token.
+    ///
+    /// Submits a `spotDeploy / registerToken2` action to the exchange.
+    /// This is the first step in the spot token deployment pipeline.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Token ticker symbol, e.g. `"MYTOKEN"`
+    /// - `sz_decimals`: Size decimals for order quantities
+    /// - `wei_decimals`: On-chain smallest unit decimals
+    /// - `max_gas`: Maximum USDC gas budget (or `None` for default)
+    /// - `full_name`: Human-readable full name, e.g. `"My Token"`
+    ///
+    /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#deploy-a-spot-token>
+    pub async fn spot_deploy_register_token<S: SignerSync>(
+        &self,
+        signer: &S,
+        name: String,
+        sz_decimals: u8,
+        wei_decimals: u8,
+        max_gas: Option<u64>,
+        full_name: String,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::register_token(
+            SpotTokenSpec { name, sz_decimals, wei_decimals },
+            max_gas,
+            full_name,
+        ));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Set the initial user token distribution for genesis.
+    ///
+    /// Submits a `spotDeploy / userGenesis` action. Call this after registering the token
+    /// and before calling [`spot_deploy_genesis`](Self::spot_deploy_genesis).
+    pub async fn spot_deploy_user_genesis<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        user_and_wei: Vec<(Address, String)>,
+        existing_token_and_wei: Vec<(u32, String)>,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::user_genesis(
+            token,
+            user_and_wei,
+            existing_token_and_wei,
+        ));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Finalize token genesis with supply cap and HLP configuration.
+    ///
+    /// Submits a `spotDeploy / genesis` action. Sets the maximum supply and optionally
+    /// opts out of automatic HLP seeding.
+    pub async fn spot_deploy_genesis<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        max_supply: String,
+        no_hyperliquidity: bool,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action =
+            Action::SpotDeploy(SpotDeployAction::genesis(token, max_supply, no_hyperliquidity));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Register a trading pair for this token.
+    ///
+    /// Submits a `spotDeploy / registerSpot` action. Creates the `BASE/QUOTE` spot market.
+    pub async fn spot_deploy_register_spot<S: SignerSync>(
+        &self,
+        signer: &S,
+        base_token: u32,
+        quote_token: u32,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action =
+            Action::SpotDeploy(SpotDeployAction::register_spot(base_token, quote_token));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Seed initial liquidity for a spot pair.
+    ///
+    /// Submits a `spotDeploy / registerHyperliquidity` action. Provides the initial
+    /// market-making orders around `start_px` on the specified spot pair.
+    pub async fn spot_deploy_register_hyperliquidity<S: SignerSync>(
+        &self,
+        signer: &S,
+        spot: u32,
+        start_px: Decimal,
+        order_sz: Decimal,
+        n_orders: u32,
+        n_seeded_levels: Option<u32>,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::register_hyperliquidity(
+            spot,
+            start_px,
+            order_sz,
+            n_orders,
+            n_seeded_levels,
+        ));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Set the deployer's share of trading fees.
+    ///
+    /// Submits a `spotDeploy / setDeployerTradingFeeShare` action.
+    /// `share` is a percent string, e.g. `"0.5"`.
+    pub async fn spot_deploy_set_deployer_fee_share<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        share: String,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action =
+            Action::SpotDeploy(SpotDeployAction::set_deployer_fee_share(token, share));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Grant the ability to freeze user accounts for this token.
+    ///
+    /// Submits a `spotDeploy / enableFreezePrivilege` action.
+    pub async fn spot_deploy_enable_freeze_privilege<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::enable_freeze_privilege(token));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Revoke the ability to freeze user accounts for this token.
+    ///
+    /// Submits a `spotDeploy / revokeFreezePrivilege` action.
+    pub async fn spot_deploy_revoke_freeze_privilege<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::revoke_freeze_privilege(token));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Freeze or unfreeze a specific user's access to this token.
+    ///
+    /// Submits a `spotDeploy / freezeUser` action.
+    /// Set `freeze = true` to freeze, `false` to unfreeze.
+    pub async fn spot_deploy_freeze_user<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        user: Address,
+        freeze: bool,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::freeze_user(token, user, freeze));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Enable this token as a quote (USDC-equivalent) token.
+    ///
+    /// Submits a `spotDeploy / enableQuoteToken` action.
+    pub async fn spot_deploy_enable_quote_token<S: SignerSync>(
+        &self,
+        signer: &S,
+        token: u32,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::SpotDeploy(SpotDeployAction::enable_quote_token(token));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    // --- Perp deploy ---
+
+    /// Register a new perpetual asset on a HIP-3 DEX.
+    ///
+    /// Submits a `perpDeploy / registerAsset` action. This creates a new perpetual market
+    /// on the specified builder-deployed DEX.
+    ///
+    /// # Parameters
+    ///
+    /// - `dex`: Target HIP-3 DEX name
+    /// - `max_gas`: Maximum USDC gas budget (or `None` for default)
+    /// - `asset_request`: Core asset specification (coin, decimals, oracle price, margin table)
+    /// - `schema`: Optional schema override (full name, collateral token, oracle updater)
+    ///
+    /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#deploy-a-perp-market>
+    pub async fn perp_deploy_register_asset<S: SignerSync>(
+        &self,
+        signer: &S,
+        dex: String,
+        max_gas: Option<u64>,
+        asset_request: PerpAssetRequest,
+        schema: Option<PerpDexSchema>,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let action = Action::PerpDeploy(PerpDeployAction::register_asset(
+            dex,
+            max_gas,
+            asset_request,
+            schema,
+        ));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    /// Update oracle and mark prices for a HIP-3 DEX.
+    ///
+    /// Submits a `perpDeploy / setOracle` action. The price lists are sorted by coin name
+    /// before sending, matching the Python SDK behaviour.
+    ///
+    /// # Parameters
+    ///
+    /// - `dex`: Target HIP-3 DEX name
+    /// - `oracle_pxs`: Oracle prices as `[(coin, price_str), ...]`
+    /// - `mark_pxs`: Per-venue mark prices as `[[(coin, price_str), ...], ...]`
+    /// - `external_perp_pxs`: External perpetual reference prices as `[(coin, price_str), ...]`
+    pub async fn perp_deploy_set_oracle<S: SignerSync>(
+        &self,
+        signer: &S,
+        dex: String,
+        mut oracle_pxs: Vec<(String, String)>,
+        mut mark_pxs: Vec<Vec<(String, String)>>,
+        mut external_perp_pxs: Vec<(String, String)>,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        // Sort by coin name, matching Python SDK behaviour
+        oracle_pxs.sort_by(|a, b| a.0.cmp(&b.0));
+        for venue in &mut mark_pxs {
+            venue.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        external_perp_pxs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let action = Action::PerpDeploy(PerpDeployAction::set_oracle(
+            dex,
+            oracle_pxs,
+            mark_pxs,
+            external_perp_pxs,
+        ));
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        self.send(req).await?.into_default()
+    }
+
+    // --- Staking query aliases (Python SDK parity) ---
+
+    /// Returns the staking summary for a user.
+    ///
+    /// Alias for [`delegator_summary`](Self::delegator_summary), using the Python SDK naming.
+    /// Returns aggregated delegation totals, pending withdrawals, and undelegated amounts.
+    pub async fn user_staking_summary(&self, user: Address) -> Result<DelegatorSummary> {
+        self.delegator_summary(user).await
+    }
+
+    /// Returns the user's individual staking delegations.
+    ///
+    /// Alias for [`delegations`](Self::delegations), using the Python SDK naming.
+    /// Returns per-validator delegation amounts and lock-until timestamps.
+    pub async fn user_staking_delegations(&self, user: Address) -> Result<Vec<Delegation>> {
+        self.delegations(user).await
+    }
+
+    /// Returns the user's historic staking reward events.
+    ///
+    /// Alias for [`delegator_rewards`](Self::delegator_rewards), using the Python SDK naming.
+    /// Each entry contains a timestamp, source, and total reward amount.
+    pub async fn user_staking_rewards(&self, user: Address) -> Result<Vec<serde_json::Value>> {
+        self.delegator_rewards(user).await
+    }
 }
+
 
 /// Builder for constructing and executing multisig transactions on Hyperliquid.
 ///

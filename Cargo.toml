@@ -144,6 +144,14 @@ name = "priority-fee-bid"
 path = "examples/hypercore/priority-fee-bid.rs"
 
 [[example]]
+name = "spot_deploy"
+path = "examples/hypercore/spot_deploy.rs"
+
+[[example]]
+name = "perp_deploy"
+path = "examples/hypercore/perp_deploy.rs"
+
+[[example]]
 name = "morpho_borrow_apy"
 path = "examples/morpho/borrow_apy.rs"
 

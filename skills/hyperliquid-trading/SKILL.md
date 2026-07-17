@@ -238,20 +238,158 @@ hypecli order cancel \
   --cloid 0xdeadbeef00000000deadbeef00000000
 ```
 
+## TP/SL Grouped Orders
+
+Hyperliquid supports atomic "grouped" orders where an entry, take-profit, and stop-loss are submitted together. Use `OrderGrouping::NormalTpsl` or `OrderGrouping::PositionTpsl`.
+
+### In Rust (via hypersdk)
+
+```rust
+use hypersdk::hypercore::types::{
+    BatchOrder, OrderGrouping, OrderRequest, OrderTypePlacement, TimeInForce, TpSl,
+};
+use rust_decimal::dec;
+
+// Take-profit trigger order (IOC, reduce-only)
+let tp = OrderRequest {
+    asset: eth_index,
+    is_buy: false,       // opposite side of the entry
+    limit_px: dec!(4000),
+    sz: dec!(0.5),
+    reduce_only: true,
+    order_type: OrderTypePlacement::Trigger {
+        tpsl: TpSl::Tp,
+    },
+    cloid: Cloid::random(),
+};
+
+// Stop-loss trigger order
+let sl = OrderRequest {
+    asset: eth_index,
+    is_buy: false,
+    limit_px: dec!(2800),
+    sz: dec!(0.5),
+    reduce_only: true,
+    order_type: OrderTypePlacement::Trigger {
+        tpsl: TpSl::Sl,
+    },
+    cloid: Cloid::random(),
+};
+
+// Entry limit order
+let entry = OrderRequest {
+    asset: eth_index,
+    is_buy: true,
+    limit_px: dec!(3000),
+    sz: dec!(0.5),
+    reduce_only: false,
+    order_type: OrderTypePlacement::Limit { tif: TimeInForce::Gtc },
+    cloid: Cloid::random(),
+};
+
+// Submit entry + TP + SL atomically
+let resp = client.place(
+    &signer,
+    BatchOrder {
+        orders: vec![entry, tp, sl],
+        grouping: OrderGrouping::NormalTpsl,  // or PositionTpsl for position-level bracket
+        builder: None,
+    },
+    nonce.next(),
+    vault_address,
+    None,
+).await?;
+```
+
+**`NormalTpsl`** — links TP/SL to this specific entry order.
+**`PositionTpsl`** — links TP/SL to the user's entire position in that asset.
+
+### View TP/SL metadata on open orders
+
+`client.open_orders(user, dex)` returns `Vec<BasicOrder>` where each order includes:
+- `is_trigger` — whether the order is a trigger order
+- `trigger_px` — the trigger price
+- `trigger_condition` — human-readable string, e.g. `"Price above 4000.0"`
+- `is_position_tpsl` — whether this is a position-level bracket
+
+---
+
+## Spot Token Deployment
+
+Deploy your own spot token on Hyperliquid in five steps (see `examples/hypercore/spot_deploy.rs`).
+
+```rust
+// Step 1: Register ticker (pays auction gas)
+client.spot_deploy_register_token(&signer, "MYTOKEN".into(), 6, 8, None, "My Token".into(), nonce, None, None).await?;
+
+// Step 2: Assign initial supply to addresses
+client.spot_deploy_user_genesis(&signer, token_index, vec![(addr, "1000000000".into())], vec![], nonce, None, None).await?;
+
+// Step 3: Finalise genesis
+client.spot_deploy_genesis(&signer, token_index, "1000000".into(), false, nonce, None, None).await?;
+
+// Step 4: Create BASE/USDC trading pair
+client.spot_deploy_register_spot(&signer, token_index, 0, nonce, None, None).await?;
+
+// Step 5: Seed initial order book
+client.spot_deploy_register_hyperliquidity(&signer, spot_index, dec!(1.0), dec!(100.0), 5, Some(2), nonce, None, None).await?;
+```
+
+Additional optional actions:
+- `spot_deploy_set_deployer_fee_share(token, share)` — take a cut of trading fees
+- `spot_deploy_enable_freeze_privilege(token)` — allow deployer to freeze users
+- `spot_deploy_freeze_user(token, user, freeze)` — freeze/unfreeze a user
+- `spot_deploy_enable_quote_token(token)` — make this a quote token
+
+---
+
+## Perpetual Market Deployment (HIP-3 DEX)
+
+Deploy perp markets on a builder DEX (see `examples/hypercore/perp_deploy.rs`).
+
+```rust
+use hypersdk::hypercore::types::{PerpAssetRequest, PerpDexSchema};
+
+// Step 1: Register asset
+client.perp_deploy_register_asset(
+    &signer, "my-dex".into(), None,
+    PerpAssetRequest { coin: "BTC".into(), sz_decimals: 4, oracle_px: "50000.0".into(), margin_table_id: 0, only_isolated: false },
+    Some(PerpDexSchema { full_name: "Bitcoin".into(), collateral_token: 0, oracle_updater: None }),
+    nonce, None, None,
+).await?;
+
+// Step 2: Push oracle prices (sorted by coin automatically)
+client.perp_deploy_set_oracle(
+    &signer, "my-dex".into(),
+    vec![("BTC".into(), "50100.0".into())],
+    vec![vec![("BTC".into(), "50050.0".into())]],
+    vec![("BTC".into(), "50000.0".into())],
+    nonce, None, None,
+).await?;
+```
+
+---
+
 ## Quick Reference
 
-| Operation            | Command                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| List perp markets    | `hypecli perps`                                                                     |
-| List spot markets    | `hypecli spot`                                                                      |
-| List HIP-3 DEXes     | `hypecli dexes`                                                                     |
-| List HIP-3 DEX perps | `hypecli perps --dex xyz`                                                           |
-| Limit order          | `hypecli order limit --asset BTC --side buy --price 50000 --size 0.1 ...`           |
-| Market order         | `hypecli order market --asset BTC --side buy --size 0.1 --slippage-price 51000 ...` |
-| Trade on HIP-3 DEX   | `hypecli order limit --asset xyz:BTC --side buy --price 50000 --size 0.1 ...`       |
-| Cancel by OID        | `hypecli order cancel --asset BTC --oid 123456789 ...`                              |
-| Cancel by CLOID      | `hypecli order cancel --asset BTC --cloid 0x... ...`                                |
-| Check positions      | `hypecli balance 0xAddress`                                                         |
+| Operation              | Command / Method                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| List perp markets      | `hypecli perps`                                                                               |
+| List spot markets      | `hypecli spot`                                                                                |
+| List HIP-3 DEXes       | `hypecli dexes`                                                                               |
+| List HIP-3 DEX perps   | `hypecli perps --dex xyz`                                                                     |
+| Limit order            | `hypecli order limit --asset BTC --side buy --price 50000 --size 0.1 ...`                     |
+| Market order           | `hypecli order market --asset BTC --side buy --size 0.1 --slippage-price 51000 ...`           |
+| Trade on HIP-3 DEX     | `hypecli order limit --asset xyz:BTC --side buy --price 50000 --size 0.1 ...`                 |
+| Cancel by OID          | `hypecli order cancel --asset BTC --oid 123456789 ...`                                        |
+| Cancel by CLOID        | `hypecli order cancel --asset BTC --cloid 0x... ...`                                          |
+| Check positions        | `hypecli balance 0xAddress`                                                                   |
+| TP/SL orders           | `BatchOrder { grouping: OrderGrouping::NormalTpsl, .. }` via Rust API                         |
+| View TP/SL metadata    | `client.open_orders(user, dex)` → `BasicOrder.is_trigger`, `.trigger_px`                     |
+| Staking summary        | `client.user_staking_summary(addr)` or `client.delegator_summary(addr)`                       |
+| Staking delegations    | `client.user_staking_delegations(addr)` or `client.delegations(addr)`                         |
+| Spot token deploy      | `client.spot_deploy_register_token(...)` → `spot_deploy_genesis(...)` → ...                   |
+| Perp market deploy     | `client.perp_deploy_register_asset(...)` → `perp_deploy_set_oracle(...)`                      |
 
 ## Links
 

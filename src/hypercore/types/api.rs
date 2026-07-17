@@ -172,6 +172,16 @@ pub enum Action {
     /// HIP-4 outcome token split/merge/negate.
     #[from(skip)]
     UserOutcome(UserOutcomeAction),
+    /// Spot token deployment actions (register, genesis, liquidity, freeze, etc.).
+    ///
+    /// Wire format: `{"type": "spotDeploy", "<subVariant>": {...}}`
+    #[from(skip)]
+    SpotDeploy(SpotDeployAction),
+    /// Perpetual market deployment actions (register asset, set oracle).
+    ///
+    /// Wire format: `{"type": "perpDeploy", "<subVariant>": {...}}`
+    #[from(skip)]
+    PerpDeploy(PerpDeployAction),
 }
 
 impl Action {
@@ -294,7 +304,9 @@ impl Action {
             | Action::CWithdraw { .. }
             | Action::ReserveRequestWeight { .. }
             | Action::Hip3LiquidatorTransfer(_)
-            | Action::UserOutcome(_) => {
+            | Action::UserOutcome(_)
+            | Action::SpotDeploy(_)
+            | Action::PerpDeploy(_) => {
                 let connection_id = self.hash(nonce, maybe_vault_address, expires_after)?;
                 let agent = solidity::Agent {
                     source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -423,7 +435,9 @@ impl Action {
             | Action::CWithdraw { .. }
             | Action::ReserveRequestWeight { .. }
             | Action::Hip3LiquidatorTransfer(_)
-            | Action::UserOutcome(_) => {
+            | Action::UserOutcome(_)
+            | Action::SpotDeploy(_)
+            | Action::PerpDeploy(_) => {
                 let connection_id = self.hash(nonce, maybe_vault_address, expires_after)?;
                 let agent = solidity::Agent {
                     source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -549,7 +563,9 @@ impl Action {
             | Action::CWithdraw { .. }
             | Action::ReserveRequestWeight { .. }
             | Action::Hip3LiquidatorTransfer(_)
-            | Action::UserOutcome(_) => {
+            | Action::UserOutcome(_)
+            | Action::SpotDeploy(_)
+            | Action::PerpDeploy(_) => {
                 let expires_after =
                     maybe_expires_after.map(|after| after.timestamp_millis() as u64);
                 let connection_id = self
@@ -1506,6 +1522,388 @@ pub struct NegateOutcome {
     /// Amount to negate.
     #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
+}
+
+// ── SpotDeploy ──────────────────────────────────────────────────────────────
+
+/// Spot token deployment action.
+///
+/// Serializes as `{"type": "spotDeploy", "<variant>": {...}}` where `<variant>` is
+/// exactly one of the fields below. All other fields are omitted via `skip_serializing_if`.
+///
+/// Use the helper constructors on this type or call the corresponding
+/// [`crate::hypercore::Client`] methods (`spot_deploy_register_token`, etc.).
+///
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#deploy-a-spot-token>
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotDeployAction {
+    /// Register a new spot token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub register_token2: Option<SpotRegisterToken>,
+    /// Set the initial user token distribution for genesis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_genesis: Option<SpotUserGenesis>,
+    /// Finalize token genesis with supply cap and HLP configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genesis: Option<SpotGenesis>,
+    /// Register a trading pair for this token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub register_spot: Option<SpotRegisterPair>,
+    /// Seed initial liquidity for a spot pair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub register_hyperliquidity: Option<SpotRegisterHyperliquidity>,
+    /// Set the deployer's share of trading fees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_deployer_trading_fee_share: Option<SpotDeployerFeeShare>,
+    /// Grant the ability to freeze user accounts for this token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_freeze_privilege: Option<SpotTokenRef>,
+    /// Revoke the ability to freeze user accounts for this token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_freeze_privilege: Option<SpotTokenRef>,
+    /// Freeze or unfreeze a specific user's access to this token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freeze_user: Option<SpotFreezeUser>,
+    /// Enable this token as a quote (USDC-equivalent) token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_quote_token: Option<SpotTokenRef>,
+}
+
+impl SpotDeployAction {
+    /// Build a `registerToken2` action.
+    #[must_use]
+    pub fn register_token(spec: SpotTokenSpec, max_gas: Option<u64>, full_name: String) -> Self {
+        Self {
+            register_token2: Some(SpotRegisterToken { spec, max_gas, full_name }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `userGenesis` action.
+    #[must_use]
+    pub fn user_genesis(
+        token: u32,
+        user_and_wei: Vec<(Address, String)>,
+        existing_token_and_wei: Vec<(u32, String)>,
+    ) -> Self {
+        Self {
+            user_genesis: Some(SpotUserGenesis { token, user_and_wei, existing_token_and_wei }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `genesis` action.
+    #[must_use]
+    pub fn genesis(token: u32, max_supply: String, no_hyperliquidity: bool) -> Self {
+        Self {
+            genesis: Some(SpotGenesis { token, max_supply, no_hyperliquidity: no_hyperliquidity.then_some(true) }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `registerSpot` action.
+    #[must_use]
+    pub fn register_spot(base_token: u32, quote_token: u32) -> Self {
+        Self {
+            register_spot: Some(SpotRegisterPair { tokens: [base_token, quote_token] }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `registerHyperliquidity` action.
+    #[must_use]
+    pub fn register_hyperliquidity(
+        spot: u32,
+        start_px: Decimal,
+        order_sz: Decimal,
+        n_orders: u32,
+        n_seeded_levels: Option<u32>,
+    ) -> Self {
+        Self {
+            register_hyperliquidity: Some(SpotRegisterHyperliquidity {
+                spot,
+                start_px,
+                order_sz,
+                n_orders,
+                n_seeded_levels,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `setDeployerTradingFeeShare` action.
+    #[must_use]
+    pub fn set_deployer_fee_share(token: u32, share: String) -> Self {
+        Self {
+            set_deployer_trading_fee_share: Some(SpotDeployerFeeShare { token, share }),
+            ..Default::default()
+        }
+    }
+
+    /// Build an `enableFreezePrivilege` action.
+    #[must_use]
+    pub fn enable_freeze_privilege(token: u32) -> Self {
+        Self {
+            enable_freeze_privilege: Some(SpotTokenRef { token }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `revokeFreezePrivilege` action.
+    #[must_use]
+    pub fn revoke_freeze_privilege(token: u32) -> Self {
+        Self {
+            revoke_freeze_privilege: Some(SpotTokenRef { token }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `freezeUser` action.
+    #[must_use]
+    pub fn freeze_user(token: u32, user: Address, freeze: bool) -> Self {
+        Self {
+            freeze_user: Some(SpotFreezeUser { token, user, freeze }),
+            ..Default::default()
+        }
+    }
+
+    /// Build an `enableQuoteToken` action.
+    #[must_use]
+    pub fn enable_quote_token(token: u32) -> Self {
+        Self {
+            enable_quote_token: Some(SpotTokenRef { token }),
+            ..Default::default()
+        }
+    }
+}
+
+/// Token spec for spot token registration.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotTokenSpec {
+    /// Token ticker symbol, e.g. `"PURR"`.
+    pub name: String,
+    /// Size decimals for order quantities.
+    pub sz_decimals: u8,
+    /// Wei decimals (on-chain smallest unit).
+    pub wei_decimals: u8,
+}
+
+/// `registerToken2` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotRegisterToken {
+    /// Token spec.
+    pub spec: SpotTokenSpec,
+    /// Maximum gas to spend on registration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_gas: Option<u64>,
+    /// Human-readable full name, e.g. `"Purr"`.
+    pub full_name: String,
+}
+
+/// `userGenesis` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotUserGenesis {
+    /// Token index.
+    pub token: u32,
+    /// List of `(address_hex_lower, wei_amount_string)` pairs for initial allocation.
+    pub user_and_wei: Vec<(Address, String)>,
+    /// List of `(existing_token_index, wei_amount_string)` pairs for cross-token genesis.
+    pub existing_token_and_wei: Vec<(u32, String)>,
+}
+
+/// `genesis` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotGenesis {
+    /// Token index.
+    pub token: u32,
+    /// Maximum token supply as a decimal string.
+    pub max_supply: String,
+    /// If `Some(true)`, disables automatic HLP seeding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_hyperliquidity: Option<bool>,
+}
+
+/// `registerSpot` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotRegisterPair {
+    /// `[base_token_index, quote_token_index]`.
+    pub tokens: [u32; 2],
+}
+
+/// `registerHyperliquidity` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotRegisterHyperliquidity {
+    /// Spot pair index (from `registerSpot`).
+    pub spot: u32,
+    /// Starting mid-price for the seeded range.
+    #[serde(with = "rust_decimal::serde::str")]
+    pub start_px: Decimal,
+    /// Size of each seeded order.
+    #[serde(with = "rust_decimal::serde::str")]
+    pub order_sz: Decimal,
+    /// Number of orders on each side.
+    pub n_orders: u32,
+    /// Number of levels to seed immediately (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n_seeded_levels: Option<u32>,
+}
+
+/// `setDeployerTradingFeeShare` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotDeployerFeeShare {
+    /// Token index.
+    pub token: u32,
+    /// Share as a percent string, e.g. `"0.5"`.
+    pub share: String,
+}
+
+/// Simple token-only reference used by privilege and quote-token actions.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotTokenRef {
+    /// Token index.
+    pub token: u32,
+}
+
+/// `freezeUser` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotFreezeUser {
+    /// Token index.
+    pub token: u32,
+    /// User address to freeze/unfreeze.
+    #[serde(
+        serialize_with = "crate::hypercore::utils::serialize_address_as_hex",
+        deserialize_with = "crate::hypercore::utils::deserialize_address_from_hex"
+    )]
+    pub user: Address,
+    /// `true` to freeze, `false` to unfreeze.
+    pub freeze: bool,
+}
+
+// ── PerpDeploy ──────────────────────────────────────────────────────────────
+
+/// Perpetual market deployment action.
+///
+/// Serializes as `{"type": "perpDeploy", "<variant>": {...}}`.
+///
+/// Use the helper constructors on this type or the corresponding
+/// [`crate::hypercore::Client`] methods (`perp_deploy_register_asset`, `perp_deploy_set_oracle`).
+///
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#deploy-a-perp-market>
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerpDeployAction {
+    /// Register a new perpetual asset on a HIP-3 DEX.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub register_asset: Option<PerpRegisterAsset>,
+    /// Update oracle and mark prices for a HIP-3 DEX.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_oracle: Option<PerpSetOracle>,
+}
+
+impl PerpDeployAction {
+    /// Build a `registerAsset` action.
+    #[must_use]
+    pub fn register_asset(
+        dex: String,
+        max_gas: Option<u64>,
+        asset_request: PerpAssetRequest,
+        schema: Option<PerpDexSchema>,
+    ) -> Self {
+        Self {
+            register_asset: Some(PerpRegisterAsset { dex, max_gas, asset_request, schema }),
+            ..Default::default()
+        }
+    }
+
+    /// Build a `setOracle` action.
+    #[must_use]
+    pub fn set_oracle(
+        dex: String,
+        oracle_pxs: Vec<(String, String)>,
+        mark_pxs: Vec<Vec<(String, String)>>,
+        external_perp_pxs: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            set_oracle: Some(PerpSetOracle { dex, oracle_pxs, mark_pxs, external_perp_pxs }),
+            ..Default::default()
+        }
+    }
+}
+
+/// `registerAsset` sub-action payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PerpRegisterAsset {
+    /// Target HIP-3 DEX name.
+    pub dex: String,
+    /// Maximum gas budget for registration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_gas: Option<u64>,
+    /// Asset specification.
+    pub asset_request: PerpAssetRequest,
+    /// Optional DEX schema (collateral token, oracle updater, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<PerpDexSchema>,
+}
+
+/// Core specification for a new perpetual asset.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PerpAssetRequest {
+    /// Ticker symbol, e.g. `"BTC"`.
+    pub coin: String,
+    /// Size decimals.
+    pub sz_decimals: u8,
+    /// Initial oracle price as a string.
+    pub oracle_px: String,
+    /// Margin table ID.
+    pub margin_table_id: u32,
+    /// If `true`, only isolated margin is allowed.
+    pub only_isolated: bool,
+}
+
+/// Optional DEX schema for a HIP-3 deployment.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PerpDexSchema {
+    /// Human-readable full name of the asset.
+    pub full_name: String,
+    /// Collateral token index.
+    pub collateral_token: u32,
+    /// Address authorised to push oracle prices, or `None` for the default.
+    #[serde(
+        serialize_with = "crate::hypercore::utils::serialize_option_address_as_hex",
+        deserialize_with = "crate::hypercore::utils::deserialize_option_address_from_hex"
+    )]
+    pub oracle_updater: Option<Address>,
+}
+
+/// `setOracle` sub-action payload.
+///
+/// Each `pxs` entry is a `(coin, price_string)` pair. The lists are sorted by
+/// the Python SDK before sending; this struct preserves insertion order and lets
+/// callers sort if needed.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PerpSetOracle {
+    /// Target HIP-3 DEX name.
+    pub dex: String,
+    /// Oracle prices: `[(coin, px_str), ...]` sorted by coin.
+    pub oracle_pxs: Vec<(String, String)>,
+    /// Per-venue mark prices: `[[(coin, px_str), ...], ...]`.
+    pub mark_pxs: Vec<Vec<(String, String)>>,
+    /// External perpetual reference prices: `[(coin, px_str), ...]`.
+    pub external_perp_pxs: Vec<(String, String)>,
 }
 
 #[cfg(test)]

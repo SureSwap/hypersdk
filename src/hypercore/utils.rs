@@ -163,6 +163,34 @@ where
     s.parse::<Address>().map_err(serde::de::Error::custom)
 }
 
+/// Serializes an `Option<Address>` as a hex string, or `null` when `None`.
+pub(super) fn serialize_option_address_as_hex<S>(
+    value: &Option<Address>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(addr) => serializer.serialize_str(&format!("{:#x}", addr)),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Deserializes an `Option<Address>` from a nullable hex string.
+pub(super) fn deserialize_option_address_from_hex<'de, D>(
+    deserializer: D,
+) -> Result<Option<Address>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    match opt {
+        None => Ok(None),
+        Some(s) => s.parse::<Address>().map(Some).map_err(serde::de::Error::custom),
+    }
+}
+
 /// Serializes a U256 value as a hex string.
 pub(super) fn serialize_as_hex<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
 where

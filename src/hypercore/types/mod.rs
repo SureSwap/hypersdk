@@ -95,9 +95,12 @@ pub(super) mod solidity;
 // Re-export important raw types for convenience
 pub use api::{
     AbstractionMode, Action, ActionRequest, ApproveBuilderFee, GossipPriorityBid,
-    Hip3LiquidatorTransferAction, MultiSigAction, MultiSigPayload, OkResponse, Response,
-    TokenDelegateAction, TwapOrderParams, UsdClassTransferAction, UserDexAbstractionAction,
-    UserSetAbstractionAction, Withdraw3Action,
+    Hip3LiquidatorTransferAction, MultiSigAction, MultiSigPayload, OkResponse,
+    PerpAssetRequest, PerpDeployAction, PerpDexSchema, PerpRegisterAsset, PerpSetOracle,
+    Response, SpotDeployAction, SpotDeployerFeeShare, SpotFreezeUser, SpotGenesis,
+    SpotRegisterHyperliquidity, SpotRegisterPair, SpotRegisterToken, SpotTokenRef, SpotTokenSpec,
+    SpotUserGenesis, TokenDelegateAction, TwapOrderParams, UsdClassTransferAction,
+    UserDexAbstractionAction, UserSetAbstractionAction, Withdraw3Action,
 };
 use api::{AgentSendAssetAction, SendAssetAction, SpotSendAction, UsdSendAction};
 
