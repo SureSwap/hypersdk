@@ -903,6 +903,8 @@ pub struct ApproveAgent {
     ///
     /// An account can have 1 unnamed approved wallet,
     /// up to 3 named ones, and 2 named agents per subaccount.
+    /// Omitted when not set — the API treats an absent `agentName` as "unnamed".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// Request nonce
     pub nonce: u64,
@@ -1920,8 +1922,10 @@ pub struct PerpDexSchema {
     pub full_name: String,
     /// Collateral token index.
     pub collateral_token: u32,
-    /// Address authorised to push oracle prices, or `None` for the default.
+    /// Address authorised to push oracle prices, or `None` to use the default.
+    /// Omitted from JSON when `None` — the server uses its default when the field is absent.
     #[serde(
+        skip_serializing_if = "Option::is_none",
         serialize_with = "crate::hypercore::utils::serialize_option_address_as_hex",
         deserialize_with = "crate::hypercore::utils::deserialize_option_address_from_hex"
     )]

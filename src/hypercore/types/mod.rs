@@ -2646,9 +2646,13 @@ pub struct CancelByCloid {
 /// Schedule cancellation of all orders.
 ///
 /// The optional `time` field can be used to delay the cancellation.
+/// Omitting `time` (i.e. `None`) **removes** any existing scheduled cancel — do not send `null`.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleCancel {
+    /// Time at which to cancel all open orders, in milliseconds.
+    /// When `None`, the scheduled cancel is cleared. The field is omitted from JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<u64>,
 }
 
