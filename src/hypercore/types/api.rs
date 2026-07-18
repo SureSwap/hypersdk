@@ -28,6 +28,10 @@ use crate::hypercore::{
 /// Request for an action.
 ///
 /// Contains the action, a nonce, signature, optional vault address, and optional expiry.
+///
+/// `vault_address` and `expires_after` are omitted from the serialized JSON when `None`.
+/// The exchange endpoint treats these as truly optional — sending `null` may be rejected
+/// by the server for certain action types or token types.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionRequest {
@@ -37,9 +41,11 @@ pub struct ActionRequest {
     pub nonce: u64,
     /// Signature
     pub signature: Signature,
-    /// Trading on behalf of
+    /// Trading on behalf of a vault or subaccount. Omitted when not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub vault_address: Option<Address>,
-    /// Timestamp in milliseconds
+    /// Timestamp in milliseconds after which the action is rejected. Omitted when not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<u64>,
 }
 
